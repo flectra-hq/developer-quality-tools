@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+# Taken from OCA maintainer quality tools. https://github.com/OCA/maintainer-quality-tools
+# Licensed Under AGPL-3
+
+"""Usage: clone_module_dependencies [<checkout_dir> <build_dir>]
+
+Arguments:
+
+deps_checkout_dir: the directory in which the dependency repositories
+will be cloned
+build_dir: the directory in which the tested repositories have been cloned
+
+If no arguments are provided, default to the layout used in the Gitlab Runnner
+configuration.
+
+The program will process the file dependencies.yml at the root of the
+tested repository, and clone the dependency repositories in checkout_dir,
+before recursively processing the dependencies.yml files of the
+dependencies.
+
+The expected format for dependencies.yml:
+
+<project-name> :
+  (required | options (private or open) type : private
+  (required) repo_url : https://gitlab.com/flectra-hq/extra-addons
+  (optional) provider : gitlab
+  (optional | required when type == 'private' ) repo_user : EXT_GITLAB_USER
+  (optional | required when type == 'private' ) repo_password : EXT_GITLAB_PASSWORD
+  (optional , defaulting to ${VERSION} ) branch : master
+
+Sample Content as follows.
+1. For Open Source Repository : 
+
+extra-addons :
+  type : open
+  repo_url : https://gitlab.com/flectra-hq/extra-addons
+  
+2. For Private Repository : 
+
+my-super-private-project:
+  provider : gitlab
+  type : private
+  repo_url : https://gitlab.com/mycompany/my-super-private-project
+  ####### DO NOT CONFIGURE LIVE USER NAME PASSWORD HERE ######
+  #### Configure Environment variable here and set them in gitlab environment variable in repo 
+  repo_user : EXT_GITLAB_USER
+  repo_password : EXT_GITLAB_PASSWORD
+"""
+
+import yaml
+from yaml import load, dump
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
+
+import sys
+import os
+import os.path as osp
+import subprocess
+import logging
+from urllib.parse import urlparse
+
+req_keys = ['repo_url','type',]
+valid_keys = ['repo_url','repo_user','repo_password','branch','provider','type']
+
+_logger = logging.getLogger()
+
+def validate_keys(data_to_validate={}):
+    keys_supplied = data_to_validate.keys()
+    
+    for dtv_key in data_to_validate:
+        if data_to_validate[dtv_key] is None or \
+        data_to_validate[dtv_key] == '' or \
+        data_to_validate[dtv_key] == False:
+            raise ValueError('No Value Found for "%s"' %dtv_key)
+    
+    if not set(req_keys).issubset(set(keys_supplied)):
+        raise ValueError('Required Keys Not Found')
+    
+    if 'type' in keys_supplied and data_to_validate['type']=='private':
+        if 'repo_user' not in data_to_validate or 'repo_password' not in data_to_validate:
+             raise ValueError('User Name or Password Not Found for Private Repo.')
+        if not data_to_validate['repo_user'] or not data_to_validate['repo_password']: 
+            raise ValueError('Value Not Found For User Name or Password for Private Repo.')  
+    
+    if len(set(keys_supplied)-set(valid_keys))>=1:
+        raise ValueError('Invalid Keys Found')
+    
+    return True
+
+def parse_depfile(depfile):
+    deps = []
+    dep_data = yaml.safe_load(depfile)
+    for dep in dep_data:
+        validate_keys(dep_data[dep])
+        o = urlparse(dep_data[dep]['repo_url'])
+        branch = 'branch' in dep_data[dep] and dep_data[dep]['branch'] or os.environ.get('VERSION')
+        repo =  o.path.split("/")[-1]
+        if dep_data[dep]['type']=="private":
+            url = o.scheme+"://"+os.environ[dep_data[dep]['repo_user']]+ \
+                      ":"+os.environ[dep_data[dep]['repo_password']]+"@"+o.netloc+o.path
+        else:
+            url = dep_data[dep]['repo_url']
+        deps.append((repo, url, str(branch)))
+    return deps
+
+def git_checkout(deps_checkout_dir, reponame, url, branch):
+    checkout_dir = osp.join(deps_checkout_dir, reponame)
+    if not osp.isdir(checkout_dir):
+        command = ['git', 'clone', '-q', url, '-b', branch, checkout_dir]
+    else:
+        command = ['git', '--git-dir=' + os.path.join(checkout_dir, '.git'),
+                   '--work-tree=' + checkout_dir, 'pull', '--ff-only',
+                   url, branch]
+    _logger.info('Calling %s', ' '.join(command))
+    subprocess.check_call(command)
+    return checkout_dir
+
+
+def run(deps_checkout_dir, build_dir):
+    dependencies = []
+    processed = set()
+    depfilename = osp.join(build_dir, 'dependencies.yml')
+    dependencies.append(depfilename)
+    reqfilenames = []
+    if osp.isfile(osp.join(build_dir, 'requirements.txt')):
+        reqfilenames.append(osp.join(build_dir, 'requirements.txt'))
+    for repo in os.listdir(deps_checkout_dir):
+        _logger.info('examining %s', repo)
+        processed.add(repo)
+        depfilename = osp.join(deps_checkout_dir, repo, 'dependencies.yml')
+        dependencies.append(depfilename)
+        reqfilename = osp.join(deps_checkout_dir, repo, 'requirements.txt')
+        if osp.isfile(reqfilename):
+            reqfilenames.append(reqfilename)
+    for depfilename in dependencies:
+        try:
+            with open(depfilename) as depfile:
+                deps = parse_depfile(depfile)
+        except IOError:
+            deps = []
+        for depname, url, branch in deps:
+            _logger.info('* processing %s', depname)
+            if depname in processed:
+                continue
+            processed.add(depname)
+            checkout_dir = git_checkout(deps_checkout_dir, depname,
+                                        url, branch)
+            new_dep_filename = osp.join(checkout_dir, 'dependencies.yml')
+            reqfilename = osp.join(checkout_dir, 'requirements.txt')
+            if osp.isfile(reqfilename):
+                reqfilenames.append(reqfilename)
+            if new_dep_filename not in dependencies:
+                dependencies.append(new_dep_filename)
+    for reqfilename in reqfilenames:
+        command = ['pip3', 'install', '--no-binary', 'pycparser',
+                   '-Ur', reqfilename]
+        _logger.info('Calling %s', ' '.join(command))
+        subprocess.check_call(command)
+
+
+if __name__ == '__main__':
+    if len(sys.argv) == 1:
+        deps_checkout_dir = osp.join(os.environ['CI_PROJECT_DIR'], 'dependencies')
+        if not osp.exists(deps_checkout_dir):
+            os.makedirs(deps_checkout_dir)
+        build_dir = os.environ['CI_PROJECT_DIR']
+    elif len(sys.argv) == 2 or len(sys.argv) > 3:
+        print(__doc__)
+        sys.exit(1)
+    else:
+        deps_checkout_dir = sys.argv[1]
+        build_dir = sys.argv[2]
+    run(deps_checkout_dir, build_dir)

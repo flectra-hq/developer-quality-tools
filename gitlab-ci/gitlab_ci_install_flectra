@@ -1,0 +1,116 @@
+#!/bin/bash
+
+#set POSTGRESQL_VERSION environment variable via export 
+#if you need any other version of postgresql
+
+POSTGRESQL_VERSION="${POSTGRESQL_VERSION:-9.6}"
+
+# identifying the version based on branch name or tag
+# Branch Name and Tag Name MUST FOLLOW THE STRUCTURE
+# <VERSION>-<FEATURE/USER/WHATEVER>
+
+if [ "${CI_COMMIT_TAG}" ]; then
+    IFS="-" read -a VINFO <<< "${CI_COMMIT_TAG}"
+    VERSION="${VINFO[0]}"
+else
+    IFS="-" read -a VINFO <<< "${CI_COMMIT_REF_NAME}"
+    VERSION="${VINFO[0]}"
+fi
+export VERSION=${VERSION}
+
+#Locale generation for UTF-8 as default Gitlab CI locale is ASCII
+locale-gen --purge en_US.UTF-8 && dpkg-reconfigure --frontend=noninteractive locales && echo -e 'LANG="en_US.UTF-8"\nLANGUAGE="en_US:en"\n' > /etc/default/locale
+
+#adding postgresql debian repo in order to access all available postgresql version
+apt-key adv --keyserver hkp://p80.pool.sks-keyservers.net:80 --recv-keys B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+echo "deb http://apt.postgresql.org/pub/repos/apt/ precise-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+
+#usual update, upgrade and install 
+
+apt-get update -qq &&  \
+apt-get upgrade -qq -y && \
+apt-get install \
+wget \
+postgresql \
+postgresql-server-dev-${POSTGRESQL_VERSION} \
+expect-dev \
+python-lxml \
+curl \
+node-less \
+build-essential \
+python3-pillow \
+python3-lxml \
+python-ldap3 \
+python3-dev \
+python3-pip \
+python3-setuptools \
+npm \
+nodejs \
+git \
+libldap2-dev \
+libsasl2-dev \
+libxml2-dev \
+libxslt1-dev \
+libjpeg-dev \
+zlib1g-dev \
+libfontconfig1 \
+python3-yaml \
+python3-click -y
+
+#adding flectra user in the system and assigning current directory as home
+
+adduser --system --quiet --shell=/bin/bash --gecos 'flectra' --group flectra --home=${CI_PROJECT_DIR}
+
+#upgrading pip3 to avoid ugly pip upgrade message 
+pip3 install --upgrade pip3
+
+#installing addional pythong libraries necessary for the project
+# if mentioned in requirements.txt 
+
+if [ -f ${CI_PROJECT_DIR}/requirements.txt ]; then
+    pip3 install -r ${CI_PROJECT_DIR}/requirements.txt
+fi
+
+#npm installation 
+npm install -g less less-plugin-clean-css -y && ln -s /usr/bin/nodejs /usr/bin/node
+
+#wkhtmltopdf downloading, SHA1SUM check and instalation
+curl -o wkhtmltox.deb -SL https://downloads.wkhtmltopdf.org/0.12/0.12.2.1/wkhtmltox-0.12.2.1_linux-trusty-amd64.deb
+echo '5c509de79121e96908794ebcb9d16647a9385e1d wkhtmltox.deb' | sha1sum -c -
+dpkg --force-depends -i wkhtmltox.deb
+
+#installing libs required for code check and testing
+pip3 install pylint flake8 coverage coveralls codecov simplejson pyserial unittest2 pyopenssl click pylint-mccabe
+
+#installing flectra lint library to code testing
+pip3 install --upgrade git+https://gitlab.com/flectra-hq/pylint-flectra.git
+
+#Geo Data library installation
+wget -N http://geolite.maxmind.com/download/geoip/database/GeoLiteCity.dat.gz && gunzip GeoLiteCity.dat.gz && mkdir -p /usr/share/GeoIP/ && mv GeoLiteCity.dat /usr/share/GeoIP/
+
+#restarting postgresql server as it's not ON by default and 
+# creating flectra user for database
+service postgresql restart && su - postgres -c "createuser -s flectra"
+
+#processing dependency of the project, 
+#checking out other dependent repo and installing
+
+if [ -f ${CI_PROJECT_DIR}/dependencies.yml ]; then
+    clone_module_dependencies
+	clone_result=$?
+	if [ "$clone_result" != "0"  ]; then
+    	echo "Error cloning dependencies"
+    	exit $clone_result
+	fi;
+fi
+
+#checking out flectra from repo based on VERSION / SERIES
+
+git clone -b $VERSION --depth=1 https://gitlab.com/flectra-hq/flectra.git flectra-${VERSION}
+
+#installing libs from flectra's requirements.txt
+pip3 install -r ${CI_PROJECT_DIR}/flectra-${VERSION}/requirements.txt
+
+#DIRTY HACK to access envrionment variables in flectra user as GITLAB CI variables are not accessible 
+# to users  other than root 
+echo "[env]" >> env.INI && env >> env.INI
