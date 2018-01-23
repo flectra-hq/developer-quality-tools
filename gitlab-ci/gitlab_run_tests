@@ -24,7 +24,6 @@ def main(test_list):
     results = []
 
     for test in test_list:
-        # keep backward compatibility with version as an argument
         print("======== Testing %s ========" % test[0])
         test_w_args = test + args
         test_file = test_w_args[0]
@@ -73,6 +72,7 @@ if __name__ == '__main__':
             'flectra_dir': values.flectra_dir,
         }
         gitlab_ci_path = (env_data.get('CI_PROJECT_DIR') + '/gitlab-ci/') or ''
+        os.environ['flectra_dir'] = env_data.get('flectra_dir') or ''
     else:
         env_data = config['env']
 
@@ -83,7 +83,6 @@ if __name__ == '__main__':
 
     os.environ['VERSION'] = env_data['VERSION']
     os.environ['CI_PROJECT_DIR'] = env_data['CI_PROJECT_DIR']
-    os.environ['flectra_dir'] = env_data['flectra_dir']
     
     # Test list. Each test is a list with command + arguments.
     tests = []
