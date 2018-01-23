@@ -9,6 +9,7 @@ import sys
 from gitlab_helpers import success_msg, fail_msg
 import configparser
 import os
+import optparse
 
 def main(test_list):
     """
@@ -21,6 +22,7 @@ def main(test_list):
     """
     args = sys.argv[1:]
     results = []
+
     for test in test_list:
         # keep backward compatibility with version as an argument
         print("======== Testing %s ========" % test[0])
@@ -52,21 +54,42 @@ if __name__ == '__main__':
 
     config = configparser.ConfigParser()
     config.read('env.INI', encoding='utf-8')
-    env_data=config['env']
-    
+
+    gitlab_ci_path = ''
+    if 'env' not in config:
+        op = optparse.OptionParser()
+        op.add_option("", "--lint-check", action="store_true", help="To test pylint")
+        op.add_option("", "--test", action="store_true", help="To test syste")
+        op.add_option("", "--version", action="store", help="Version of your system")
+        op.add_option("", "--ci-project-dir", action="store", help="Directory path of flectra")
+        op.add_option("", "--flectra-dir", action="store", help="Directory path of flectra")
+
+        (values, args) = op.parse_args()
+        env_data = {
+            'LINT_CHECK': values.lint_check,
+            'TESTS': values.test,
+            'VERSION': values.version,
+            'CI_PROJECT_DIR': values.ci_project_dir,
+            'flectra_dir': values.flectra_dir,
+        }
+        gitlab_ci_path = (env_data.get('CI_PROJECT_DIR') + '/gitlab-ci/') or ''
+    else:
+        env_data = config['env']
+
     lint_check_disabled = env_data.get('LINT_CHECK') == '0'
     lint_check_enabled = env_data.get('LINT_CHECK') == '1'
     tests_enabled = env_data.get('TESTS')
     tests_unspecified = env_data.get('TESTS') is None
 
-    os.environ['VERSION']=env_data['VERSION']
-    os.environ['CI_PROJECT_DIR']=env_data['CI_PROJECT_DIR']
+    os.environ['VERSION'] = env_data['VERSION']
+    os.environ['CI_PROJECT_DIR'] = env_data['CI_PROJECT_DIR']
+    os.environ['flectra_dir'] = env_data['flectra_dir']
     
     # Test list. Each test is a list with command + arguments.
     tests = []
     if not lint_check_disabled:
-        tests.append(['test_flake8'])
-        tests.append(['test_pylint'])
+        tests.append([gitlab_ci_path + 'test_flake8'])
+        tests.append([gitlab_ci_path + 'test_pylint'])
 
     if tests_unspecified and not lint_check_enabled:
         tests.append(['test_server.py'])

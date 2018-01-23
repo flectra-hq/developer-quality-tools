@@ -333,8 +333,8 @@ def main(argv=None):
     test_loglevel = 'info'
     test_loghandler = 'flectra.tools.yaml_import:DEBUG'
     flectra_full = os.environ.get("FLECTRA_REPO", "flectra-hq/flectra")
-    server_path = get_server_path(flectra_full, flectra_branch or flectra_version,
-                                  gitlab_home)
+    server_path = os.environ.get(os.environ['flectra_dir'], get_server_path(
+        flectra_full, flectra_branch or flectra_version, gitlab_home))
     script_name = get_server_script(server_path)
     addons_path = get_addons_path(gitlab_dependencies_dir,
                                   gitlab_build_dir,
