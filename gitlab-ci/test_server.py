@@ -2,15 +2,17 @@
 # -*- coding: utf-8 -*-
 
 import ast
-import re
 import os
+import re
 import shutil
 import subprocess
 import sys
+
+from configparser import ConfigParser
 from six import string_types
+
 from getaddons import get_addons, get_modules, is_installable_module
 from gitlab_helpers import success_msg, fail_msg
-from configparser import ConfigParser
 
 
 def has_test_errors(fname, dbname, flectra_version, check_loaded=True):
@@ -30,13 +32,13 @@ def has_test_errors(fname, dbname, flectra_version, check_loaded=True):
     errors_ignore = [
         'Mail delivery failed',
         'failed sending mail',
-        ]
+    ]
     errors_report = [
         lambda x: x['loglevel'] == 'CRITICAL',
         'At least one test failed',
         'no access rules, consider adding one',
         'invalid module names, ignored',
-        ]
+    ]
     # Only check ERROR lines before 7.0
     if flectra_version < '7.0':
         errors_report.append(
@@ -46,17 +48,17 @@ def has_test_errors(fname, dbname, flectra_version, check_loaded=True):
         for i in range(len(pattern_list)):
             if isinstance(pattern_list[i], string_types):
                 regex = re.compile(pattern_list[i])
-                pattern_list[i] = lambda x, regex=regex:\
+                pattern_list[i] = lambda x, regex=regex: \
                     regex.search(x['message'])
             elif hasattr(pattern_list[i], 'match'):
                 regex = pattern_list[i]
-                pattern_list[i] = lambda x, regex=regex:\
+                pattern_list[i] = lambda x, regex=regex: \
                     regex.search(x['message'])
 
     make_pattern_list_callable(errors_ignore)
     make_pattern_list_callable(errors_report)
 
-    print("-"*10)
+    print("-" * 10)
     # Read log file removing ASCII color escapes:
     # http://serverfault.com/questions/71285
     color_regex = re.compile(r'\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]')
@@ -97,7 +99,7 @@ def has_test_errors(fname, dbname, flectra_version, check_loaded=True):
     if errors:
         for e in errors:
             print(e['message'])
-        print("-"*10)
+        print("-" * 10)
     return len(errors)
 
 
@@ -237,11 +239,11 @@ def setup_server(db, flectra_unittest, tested_addons, server_path, script_name,
         # unbuffer keeps output colors
         cmd_flectra = ["unbuffer"] if unbuffer else []
         cmd_flectra += ["%s/%s" % (server_path, script_name),
-                     "-d", db,
-                     "--log-level=info",
-                     "--stop-after-init",
-                     "--init", ','.join(preinstall_modules),
-                     ] + install_options + server_options
+                        "-d", db,
+                        "--log-level=info",
+                        "--stop-after-init",
+                        "--init", ','.join(preinstall_modules),
+                        ] + install_options + server_options
         print(" ".join(cmd_strip_secret(cmd_flectra)))
         try:
             subprocess.check_call(cmd_flectra)
@@ -320,21 +322,13 @@ def main(argv=None):
         flectra_version = argv[1]
         print("WARNING: no env variable set for VERSION. "
               "Using '%s'" % flectra_version)
-    test_loghandler = None
-#     if flectra_version == "6.1":
-#         install_options += ["--test-disable"]
-#         test_loglevel = 'test'
-#     else:
-#         if test_enable:
-#             options += ["--test-enable"]
-#         if flectra_version == '7.0':
-#             test_loglevel = 'test'
-#         else:
     test_loglevel = 'info'
     test_loghandler = 'flectra.tools.yaml_import:DEBUG'
     flectra_full = os.environ.get("FLECTRA_REPO", "flectra-hq/flectra")
-    server_path = os.environ.get(os.environ['flectra_dir'], get_server_path(
-        flectra_full, flectra_branch or flectra_version, gitlab_home))
+    server_path = os.environ.get('flectra_dir') or get_server_path(
+        flectra_full,
+        flectra_branch or flectra_version,
+        gitlab_home)
     script_name = get_server_script(server_path)
     addons_path = get_addons_path(gitlab_dependencies_dir,
                                   gitlab_build_dir,
@@ -369,12 +363,12 @@ def main(argv=None):
 
     # Running tests
     cmd_flectra_test = ["coverage", "run",
-                     "%s/%s" % (server_path, script_name),
-                     "-d", database,
-                     "--db-filter=^%s$" % database,
-                     "--stop-after-init",
-                     "--log-level", test_loglevel,
-                     ]
+                        "%s/%s" % (server_path, script_name),
+                        "-d", database,
+                        "--db-filter=^%s$" % database,
+                        "--stop-after-init",
+                        "--log-level", test_loglevel,
+                        ]
 
     if test_loghandler is not None:
         cmd_flectra_test += ['--log-handler', test_loghandler]
@@ -383,11 +377,11 @@ def main(argv=None):
     if flectra_unittest:
         to_test_list = tested_addons_list
         cmd_flectra_install = [
-            "%s/%s" % (server_path, script_name),
-            "-d", database,
-            "--stop-after-init",
-            "--log-level=warn",
-        ] + install_options + ["--init", None] + server_options
+                                  "%s/%s" % (server_path, script_name),
+                                  "-d", database,
+                                  "--stop-after-init",
+                                  "--log-level=warn",
+                              ] + install_options + ["--init", None] + server_options
         commands = ((cmd_flectra_install, False),
                     (cmd_flectra_test, True),
                     )
@@ -418,7 +412,7 @@ def main(argv=None):
                 command_call = [item
                                 for item in commands[0][0]
                                 if item not in rm_items] + \
-                    ['--pidfile=/tmp/flectra.pid']
+                               ['--pidfile=/tmp/flectra.pid']
             else:
                 command[-1] = to_test
                 # Run test command; unbuffer keeps output colors

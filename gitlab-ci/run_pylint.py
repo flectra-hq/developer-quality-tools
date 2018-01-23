@@ -161,7 +161,6 @@ def pylint_run(is_pr, version, dir):
     branch_base = get_branch_base()
     extra_params_cmd = get_extra_params(flectra_version)
     extra_info = "extra_params_cmd %s " % extra_params_cmd
-    print (extra_info)
     conf = ["--config-file=%s" % (pylint_rcfile)]
     cmd = conf + modules_cmd + extra_params_cmd
 
